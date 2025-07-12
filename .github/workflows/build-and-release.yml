@@ -1,0 +1,399 @@
+name: 构建和发布到私有仓库
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: '是否创建发布'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  # 代码检查任务
+  lint:
+    name: 代码检查
+    runs-on: ubuntu-24.04
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 设置Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: 安装系统依赖
+      run: |
+        sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+        npm i -g yarn
+
+    - name: 安装项目依赖
+      run: |
+        cd app && yarn
+        cd .. && rm -f app/node_modules/.yarn-integrity
+        yarn
+
+    - name: 构建类型定义
+      run: yarn run build:typings
+
+    - name: 执行代码检查
+      run: yarn run lint
+
+  # Windows构建任务
+  build-windows:
+    name: Windows构建 (${{ matrix.arch }})
+    runs-on: windows-latest
+    needs: lint
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            rust_triple: x86_64-pc-windows-msvc
+          - arch: arm64
+            rust_triple: aarch64-pc-windows-msvc
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 设置Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: 安装Rust目标
+      run: rustup target add ${{ matrix.rust_triple }}
+
+    - name: 更新node-gyp
+      run: |
+        npm install --global node-gyp@10.2.0
+        npm prefix -g | % {npm config set node_gyp "$_\node_modules\node-gyp\bin\node-gyp.js"}
+
+    - name: 安装依赖并构建
+      shell: powershell
+      run: |
+        npm i -g yarn node-gyp
+        yarn --network-timeout 1000000
+        yarn run build
+        node scripts/prepackage-plugins.mjs
+      env:
+        ARCH: ${{ matrix.arch }}
+        RUST_TARGET_TRIPLE: ${{ matrix.rust_triple }}
+
+    - name: 构建Windows应用
+      run: node scripts/build-windows.mjs
+      env:
+        ARCH: ${{ matrix.arch }}
+
+    - name: 整理构建产物
+      run: |
+        mkdir artifacts-setup
+        mkdir artifacts-portable
+        if (Test-Path "dist/*-setup-*.exe") { Move-Item "dist/*-setup-*.exe" "artifacts-setup/" }
+        if (Test-Path "dist/*-portable-*.zip") { Move-Item "dist/*-portable-*.zip" "artifacts-portable/" }
+      shell: powershell
+
+    - name: 上传Windows安装包
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-installer-${{ matrix.arch }}
+        path: artifacts-setup/*
+      if: always()
+
+    - name: 上传Windows便携版
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-portable-${{ matrix.arch }}
+        path: artifacts-portable/*
+      if: always()
+
+  # macOS构建任务
+  build-macos:
+    name: macOS构建 (${{ matrix.arch }})
+    runs-on: macos-15
+    needs: lint
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            rust_triple: x86_64-apple-darwin
+          - arch: arm64
+            rust_triple: aarch64-apple-darwin
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 设置Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: 安装Rust目标
+      run: rustup target add ${{ matrix.rust_triple }}
+
+    - name: 安装依赖
+      run: |
+        npm i -g yarn
+        yarn --network-timeout 1000000
+      env:
+        ARCH: ${{ matrix.arch }}
+
+    - name: 构建前端
+      run: yarn run build
+
+    - name: 预打包插件
+      run: node scripts/prepackage-plugins.mjs
+      env:
+        ARCH: ${{ matrix.arch }}
+
+    - name: 修复electron-builder问题
+      run: |
+        sed -i '' 's/updateInfo = await/\/\/updateInfo = await/g' node_modules/app-builder-lib/out/targets/ArchiveTarget.js || true
+        ln -s ../../node_modules/electron app/node_modules || true
+
+    - name: 构建macOS应用
+      run: node scripts/build-macos.mjs
+      env:
+        ARCH: ${{ matrix.arch }}
+        RUST_TARGET_TRIPLE: ${{ matrix.rust_triple }}
+        USE_HARD_LINKS: false
+
+    - name: 整理构建产物
+      run: |
+        mkdir -p artifacts-dmg artifacts-zip
+        [[ -f dist/*.dmg ]] && mv dist/*.dmg artifacts-dmg/ || true
+        [[ -f dist/*.zip ]] && mv dist/*.zip artifacts-zip/ || true
+        ls -la artifacts-dmg/ artifacts-zip/
+
+    - name: 上传macOS DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-dmg-${{ matrix.arch }}
+        path: artifacts-dmg/*
+      if: always()
+
+    - name: 上传macOS ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-zip-${{ matrix.arch }}
+        path: artifacts-zip/*
+      if: always()
+
+  # Linux构建任务
+  build-linux:
+    name: Linux构建 (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    needs: lint
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            rust_triple: x86_64-unknown-linux-gnu
+            build_arch: x64
+          - arch: arm64
+            rust_triple: aarch64-unknown-linux-gnu
+            build_arch: arm64
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 设置Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: 安装系统依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libfontconfig1-dev libarchive-tools
+        sudo gem install fpm
+        npm i -g yarn
+
+    - name: 安装Rust目标
+      run: rustup target add ${{ matrix.rust_triple }}
+
+    - name: 安装依赖
+      run: yarn --network-timeout 1000000
+      env:
+        ARCH: ${{ matrix.build_arch }}
+        npm_config_arch: ${{ matrix.build_arch }}
+        npm_config_target_arch: ${{ matrix.build_arch }}
+        RUST_TARGET_TRIPLE: ${{ matrix.rust_triple }}
+
+    - name: 构建前端
+      run: yarn run build
+      env:
+        ARCH: ${{ matrix.build_arch }}
+
+    - name: 预打包插件
+      run: node scripts/prepackage-plugins.mjs
+      env:
+        ARCH: ${{ matrix.build_arch }}
+
+    - name: 构建Linux应用
+      run: node scripts/build-linux.mjs
+      env:
+        ARCH: ${{ matrix.build_arch }}
+        RUST_TARGET_TRIPLE: ${{ matrix.rust_triple }}
+        USE_HARD_LINKS: false
+        USE_SYSTEM_FPM: true
+
+    - name: 整理构建产物
+      run: |
+        mkdir -p artifacts
+        [[ -f dist/*.AppImage ]] && mv dist/*.AppImage artifacts/ || true
+        [[ -f dist/*.deb ]] && mv dist/*.deb artifacts/ || true
+        [[ -f dist/*.rpm ]] && mv dist/*.rpm artifacts/ || true
+        [[ -f dist/*.tar.gz ]] && mv dist/*.tar.gz artifacts/ || true
+        [[ -f dist/*.pacman ]] && mv dist/*.pacman artifacts/ || true
+        ls -la artifacts/
+
+    - name: 上传Linux构建产物
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux-${{ matrix.arch }}
+        path: artifacts/*
+      if: always()
+
+  # 发布任务
+  release:
+    name: 创建发布
+    runs-on: ubuntu-24.04
+    needs: [build-windows, build-macos, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 下载所有构建产物
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: 整理发布文件
+      run: |
+        mkdir -p release
+        echo "📁 整理构建产物..."
+        find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.zip" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "*.pacman" \) -exec cp {} release/ \;
+        
+        echo "📦 发布文件列表:"
+        ls -la release/
+        
+        echo "📊 文件统计:"
+        echo "Windows 文件: $(find release -name "*.exe" -o -name "*windows*.zip" | wc -l) 个"
+        echo "macOS 文件: $(find release -name "*.dmg" -o -name "*macos*.zip" | wc -l) 个" 
+        echo "Linux 文件: $(find release -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "*.pacman" | wc -l) 个"
+
+    - name: 获取发布信息
+      id: release_info
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          echo "tag_name=v$(date '+%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+          echo "release_name=Tabby Terminal 手动构建 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+          echo "is_prerelease=true" >> $GITHUB_OUTPUT
+        else
+          echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "release_name=Tabby Terminal ${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          echo "is_prerelease=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: 生成更新日志
+      run: |
+        cat > RELEASE_NOTES.md << 'EOF'
+        # 🚀 Tabby Terminal 发布
+
+        基于原版 [Tabby Terminal](https://github.com/Eugeny/tabby) 的定制版本。
+
+        ## 📦 下载说明
+
+        ### Windows 版本
+        - **安装版**: `*-setup-*.exe` - 推荐用户使用，会自动安装到系统
+        - **便携版**: `*-portable-*.zip` - 绿色版本，解压即用
+
+        ### macOS 版本  
+        - **DMG 安装包**: `*.dmg` - 拖拽到应用程序文件夹安装
+        - **ZIP 压缩包**: `*.zip` - 直接解压使用
+
+        ### Linux 版本
+        - **AppImage**: `*.AppImage` - 通用Linux版本，下载后直接运行
+        - **DEB 包**: `*.deb` - 适用于 Ubuntu/Debian 系统
+        - **RPM 包**: `*.rpm` - 适用于 CentOS/RHEL/Fedora 系统
+        - **TAR.GZ**: `*.tar.gz` - 通用压缩包版本
+        - **Pacman**: `*.pacman` - 适用于 Arch Linux 系统
+
+        ## 🔧 架构支持
+
+        - **x64/amd64**: Intel/AMD 64位处理器
+        - **arm64**: Apple Silicon (M1/M2) 和 ARM64 处理器
+
+        ## ⚙️ 主要功能
+
+        - 🖥️ 多平台终端模拟器
+        - 🔌 丰富的插件生态系统
+        - 🎨 可定制的主题和外观
+        - 🔐 SSH/Telnet/Serial 连接支持
+        - 📂 文件传输和管理
+        - 🛡️ 安全连接和密钥管理
+
+        ## 🔗 相关链接
+
+        - [原项目仓库](https://github.com/Eugeny/tabby)
+        - [私有仓库](https://github.com/dbds-team/my_tabby)
+        - [问题反馈](https://github.com/${{ github.repository }}/issues)
+
+        ---
+
+        **构建时间**: $(date '+%Y-%m-%d %H:%M:%S UTC')  
+        **Git 提交**: \`${{ github.sha }}\`  
+        **工作流程**: ${{ github.workflow }}
+        EOF
+
+    - name: 创建GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.release_info.outputs.tag_name }}
+        name: ${{ steps.release_info.outputs.release_name }}
+        body_path: RELEASE_NOTES.md
+        draft: false
+        prerelease: ${{ steps.release_info.outputs.is_prerelease }}
+        files: release/*
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 发布成功通知
+      run: |
+        echo "🎉 发布成功完成！"
+        echo ""
+        echo "📦 发布信息:"
+        echo "  版本: ${{ steps.release_info.outputs.release_name }}"
+        echo "  标签: ${{ steps.release_info.outputs.tag_name }}"
+        echo "  预发布: ${{ steps.release_info.outputs.is_prerelease }}"
+        echo ""
+        echo "🔗 访问地址:"
+        echo "  https://github.com/${{ github.repository }}/releases/tag/${{ steps.release_info.outputs.tag_name }}"
+        echo ""
+        echo "📋 发布内容统计:"
+        echo "  Windows: $(find release -name "*.exe" -o -name "*windows*.zip" | wc -l) 个文件"
+        echo "  macOS: $(find release -name "*.dmg" -o -name "*macos*.zip" | wc -l) 个文件"
+        echo "  Linux: $(find release -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "*.pacman" | wc -l) 个文件" 
