@@ -1,20 +1,7 @@
 name: 构建和发布到私有仓库
 on:
   push:
-    branches: [main, master]
     tags: ['v*']
-  pull_request:
-    branches: [main, master]
-  workflow_dispatch:
-    inputs:
-      create_release:
-        description: '是否创建发布'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-        - 'true'
-        - 'false'
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -278,7 +265,7 @@ jobs:
     name: 创建发布
     runs-on: ubuntu-24.04
     needs: [build-windows, build-macos, build-linux]
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
@@ -307,15 +294,9 @@ jobs:
     - name: 获取发布信息
       id: release_info
       run: |
-        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          echo "tag_name=v$(date '+%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-          echo "release_name=Tabby Terminal 手动构建 $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
-          echo "is_prerelease=true" >> $GITHUB_OUTPUT
-        else
-          echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          echo "release_name=Tabby Terminal ${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          echo "is_prerelease=false" >> $GITHUB_OUTPUT
-        fi
+        echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        echo "release_name=Tabby Terminal ${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        echo "is_prerelease=false" >> $GITHUB_OUTPUT
 
     - name: 生成更新日志
       run: |
