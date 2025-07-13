@@ -164,23 +164,59 @@ jobs:
     - name: 整理构建产物
       run: |
         mkdir -p artifacts-dmg artifacts-zip
-        [[ -f dist/*.dmg ]] && mv dist/*.dmg artifacts-dmg/ || true
-        [[ -f dist/*.zip ]] && mv dist/*.zip artifacts-zip/ || true
+        echo "📁 检查 dist 目录内容:"
+        ls -la dist/ || echo "dist 目录不存在"
+        
+        # 移动 dmg 文件
+        if ls dist/*.dmg 1> /dev/null 2>&1; then
+          echo "✅ 找到 DMG 文件"
+          mv dist/*.dmg artifacts-dmg/
+        else
+          echo "❌ 未找到 DMG 文件"
+        fi
+        
+        # 移动 zip 文件
+        if ls dist/*.zip 1> /dev/null 2>&1; then
+          echo "✅ 找到 ZIP 文件"
+          mv dist/*.zip artifacts-zip/
+        else
+          echo "❌ 未找到 ZIP 文件"
+        fi
+        
+        echo "📦 整理后的构建产物:"
         ls -la artifacts-dmg/ artifacts-zip/
+
+    - name: 检查 DMG 文件
+      id: check_dmg
+      run: |
+        if ls artifacts-dmg/*.dmg 1> /dev/null 2>&1; then
+          echo "has_dmg=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_dmg=false" >> $GITHUB_OUTPUT
+        fi
 
     - name: 上传macOS DMG
       uses: actions/upload-artifact@v4
       with:
         name: macos-dmg-${{ matrix.arch }}
         path: artifacts-dmg/*
-      if: always()
+      if: steps.check_dmg.outputs.has_dmg == 'true'
+
+    - name: 检查 ZIP 文件
+      id: check_zip
+      run: |
+        if ls artifacts-zip/*.zip 1> /dev/null 2>&1; then
+          echo "has_zip=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_zip=false" >> $GITHUB_OUTPUT
+        fi
 
     - name: 上传macOS ZIP
       uses: actions/upload-artifact@v4
       with:
         name: macos-zip-${{ matrix.arch }}
         path: artifacts-zip/*
-      if: always()
+      if: steps.check_zip.outputs.has_zip == 'true'
 
   # Linux构建任务
   build-linux:
