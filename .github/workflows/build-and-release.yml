@@ -253,12 +253,17 @@ jobs:
         cd .. && rm -f app/node_modules/.yarn-integrity
         yarn --network-timeout 1000000
 
-    - name: 创建Android项目
-      run: node scripts/build-android.mjs
+    - name: 构建前端
+      run: |
+        yarn run build
+        node scripts/prepackage-plugins.mjs
+
+    - name: 创建Android Hybrid项目
+      run: node scripts/build-android-hybrid.mjs
 
     - name: 准备Android项目
       run: |
-        cd android-app
+        cd android-hybrid
         # 下载gradle wrapper
         curl -L https://github.com/gradle/gradle/raw/v8.5.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
         # 创建示例构建说明
@@ -288,16 +293,23 @@ jobs:
         - 建议先在本地环境测试构建
         EOF
         
+        # 复制构建好的Web资源
+        mkdir -p www
+        cp -r ../dist/* www/ || echo "需要先构建Web版本"
+        
         # 打包Android项目模板
         cd ..
-        tar -czf android-app-template.tar.gz android-app/
+        tar -czf android-hybrid-template.tar.gz android-hybrid/
 
     - name: 整理构建产物
       run: |
         mkdir -p artifacts-apk
-        mv android-app-template.tar.gz artifacts-apk/
-        echo "Android项目模板已准备就绪" > artifacts-apk/README.txt
-        echo "解压 android-app-template.tar.gz 并使用 Android Studio 打开进行构建" >> artifacts-apk/README.txt
+        mv android-hybrid-template.tar.gz artifacts-apk/
+        echo "Android Hybrid项目模板已准备就绪" > artifacts-apk/README.txt
+        echo "包含完整的Web资源和Capacitor配置" >> artifacts-apk/README.txt
+        echo "解压 android-hybrid-template.tar.gz 并按照README.md构建" >> artifacts-apk/README.txt
+        # 显示打包内容大小
+        echo "📦 打包大小: $(du -sh android-hybrid-template.tar.gz | cut -f1)"
 
     - name: 上传Android APK
       uses: actions/upload-artifact@v4
