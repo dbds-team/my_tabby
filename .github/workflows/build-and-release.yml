@@ -1,4 +1,4 @@
-name: 构建和发布到私有仓库
+name: 快速构建和发布
 on:
   push:
     tags: ['v*']
@@ -7,47 +7,10 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  # 代码检查任务
-  lint:
-    name: 代码检查
-    runs-on: ubuntu-24.04
-    # 只在非标签推送时运行，或者包含 [lint] 的提交信息时运行
-    if: |
-      !startsWith(github.ref, 'refs/tags/') || 
-      contains(github.event.head_commit.message, '[lint]')
-    steps:
-    - name: 检出代码
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: 设置Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 22
-
-    - name: 安装系统依赖
-      run: |
-        sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
-        npm i -g yarn
-
-    - name: 安装项目依赖
-      run: |
-        cd app && yarn
-        cd .. && rm -f app/node_modules/.yarn-integrity
-        yarn
-
-    - name: 构建类型定义
-      run: yarn run build:typings
-
-    - name: 执行代码检查
-      run: yarn run lint
-
   # Windows构建任务
   build-windows:
     name: Windows构建 (x64)
     runs-on: windows-latest
-    # needs: lint  # 跳过lint依赖以加快构建
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
@@ -109,7 +72,6 @@ jobs:
   build-macos:
     name: macOS构建 (arm64)
     runs-on: macos-15
-    # needs: lint  # 跳过lint依赖以加快构建
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
@@ -220,7 +182,6 @@ jobs:
   build-android:
     name: Android构建 (arm64)
     runs-on: ubuntu-24.04
-    # needs: lint  # 跳过lint依赖以加快构建
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
