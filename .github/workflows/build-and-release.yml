@@ -253,13 +253,11 @@ jobs:
         cd .. && rm -f app/node_modules/.yarn-integrity
         yarn --network-timeout 1000000
 
-    - name: 构建前端
-      run: |
-        yarn run build
-        node scripts/prepackage-plugins.mjs
-
     - name: 创建Android Hybrid项目
-      run: node scripts/build-android-hybrid.mjs
+      run: |
+        # 构建脚本会自动执行yarn run build
+        node scripts/build-android-hybrid.mjs
+        node scripts/prepackage-plugins.mjs
 
     - name: 准备Android项目
       run: |
@@ -292,9 +290,14 @@ jobs:
         - 建议先在本地环境测试构建
         EOF
         
-        # 复制构建好的Web资源
-        mkdir -p www
-        cp -r ../dist/* www/ || echo "需要先构建Web版本"
+        # 检查并复制Web资源
+        echo "📁 检查dist目录:"
+        if [ -d "../dist" ]; then
+          echo "✅ 找到dist目录，内容大小: $(du -sh ../dist | cut -f1)"
+          ls -la ../dist | head -10
+        else
+          echo "❌ 未找到dist目录"
+        fi
         
         # 打包Android项目模板
         cd ..
