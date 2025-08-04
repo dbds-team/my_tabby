@@ -178,134 +178,133 @@ jobs:
         path: artifacts-zip/*
       if: steps.check_zip.outputs.has_zip == 'true'
 
-  # Android构建任务
-  build-android:
-    name: Android构建 (arm64)
+  # Linux ARM64构建任务（用于Android平板）
+  build-linux-arm64:
+    name: Linux ARM64构建 (Android平板)
     runs-on: ubuntu-24.04
+    
+    env:
+      CC: aarch64-linux-gnu-gcc
+      CXX: aarch64-linux-gnu-g++
+      ARCH: arm64
+      npm_config_arch: arm64
+      npm_config_target_arch: arm64
+      RUST_TARGET_TRIPLE: aarch64-unknown-linux-gnu
+    
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: 设置JDK
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-
     - name: 设置Node.js
       uses: actions/setup-node@v4
       with:
         node-version: 22
 
-    - name: 设置Android SDK
-      uses: android-actions/setup-android@v3
+    - name: 安装FPM
+      run: sudo gem install fpm
+
+    - name: 安装Rust目标
+      run: rustup target add aarch64-unknown-linux-gnu
 
     - name: 安装系统依赖
       run: |
         sudo apt-get update
-        sudo apt-get install -y libfontconfig1-dev
+        sudo apt-get install -y libfontconfig1-dev libarchive-tools crossbuild-essential-arm64
 
-    - name: 安装依赖
+    - name: 安装npm依赖
       run: |
-        npm i -g yarn
-        cd app && yarn --network-timeout 1000000
-        cd .. && rm -f app/node_modules/.yarn-integrity
-        yarn --network-timeout 1000000
+        npm i -g yarn node-gyp
+        yarn --network-timeout 1000000 --arch=arm64 --target-arch=arm64
 
-    - name: 创建Android Hybrid项目
+    - name: 构建前端
+      run: yarn run build --arch=arm64 --target-arch=arm64
+
+    - name: 预打包插件
+      run: node scripts/prepackage-plugins.mjs
+
+    - name: 构建Linux包
+      run: node scripts/build-linux.mjs
+      env:
+        USE_HARD_LINKS: false
+        USE_SYSTEM_FPM: true
+
+    - name: 打包Web资源
       run: |
-        # 构建脚本会自动执行yarn run build
-        node scripts/build-android-hybrid.mjs
-        node scripts/prepackage-plugins.mjs
-
-    - name: 准备Android项目
-      run: |
-        cd android-hybrid
-        # 不需要gradle wrapper，Capacitor会自动处理
-        # 创建示例构建说明
-        cat > BUILD_INSTRUCTIONS.md << 'EOF'
-        # Tabby Terminal Android 构建说明
-
-        ## 环境要求
-        - Android Studio Arctic Fox 或更高版本
-        - JDK 17
-        - Android SDK (API Level 34)
-        - Android NDK (如需原生代码支持)
-
-        ## 构建步骤
-        1. 用 Android Studio 打开此目录
-        2. 等待 Gradle 同步完成
-        3. 点击 Build > Build APK 或 Build > Generate Signed APK
-
-        ## 命令行构建
-        ```bash
-        ./gradlew assembleDebug    # 构建调试版本
-        ./gradlew assembleRelease  # 构建发布版本
-        ```
-
-        ## 注意事项
-        - 首次构建需要下载依赖，请确保网络连接正常
-        - Termux 相关依赖可能需要额外配置
-        - 建议先在本地环境测试构建
+        echo "📦 创建便携版本..."
+        mkdir -p tabby-linux-arm64
+        cp -r app/dist tabby-linux-arm64/
+        cp -r builtin-plugins tabby-linux-arm64/
+        
+        # 创建启动脚本
+        cat > tabby-linux-arm64/tabby.sh << 'EOF'
+        #!/bin/bash
+        # Tabby Terminal for Linux ARM64
+        # 适用于Android平板的Termux环境
+        
+        SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+        cd "$SCRIPT_DIR"
+        
+        # 检查Node.js
+        if ! command -v node &> /dev/null; then
+            echo "错误: 未找到Node.js，请先安装Node.js"
+            echo "在Termux中运行: pkg install nodejs"
+            exit 1
+        fi
+        
+        # 启动Tabby
+        node dist/main.js "$@"
         EOF
         
-        # 检查项目内容
-        echo "📁 Android项目内容:"
-        ls -la
-        echo "📦 项目大小: $(du -sh . | cut -f1)"
+        chmod +x tabby-linux-arm64/tabby.sh
         
-        # 打包Android项目模板
-        cd ..
-        echo "📦 打包前检查目录大小:"
-        du -sh android-hybrid/
-        echo "📁 检查www目录内容:"
-        if [ -d android-hybrid/www ]; then
-          echo "www目录存在"
-          ls -la android-hybrid/www/ | head -10
-          echo "www目录大小: $(du -sh android-hybrid/www/ | cut -f1)"
-        else
-          echo "❌ www目录不存在"
-        fi
-        # 使用更详细的tar命令
-        tar -czvf android-hybrid-template.tar.gz android-hybrid/ > tar-files.log 2>&1
-        echo "📦 打包后文件大小:"
-        ls -lh android-hybrid-template.tar.gz
-        echo "📋 打包文件数量: $(wc -l < tar-files.log)"
-
-    - name: 整理构建产物
-      run: |
-        # 确保在正确的目录
-        echo "📁 当前目录: $(pwd)"
-        ls -la
+        # 创建README
+        cat > tabby-linux-arm64/README.md << 'EOF'
+        # Tabby Terminal for Linux ARM64 (Android平板)
         
-        mkdir -p artifacts-apk
-        if [ -f android-hybrid-template.tar.gz ]; then
-          mv android-hybrid-template.tar.gz artifacts-apk/
-          echo "Android Hybrid项目模板已准备就绪" > artifacts-apk/README.txt
-          echo "包含完整的Web资源和Capacitor配置" >> artifacts-apk/README.txt
-          echo "解压 android-hybrid-template.tar.gz 并按照README.md构建" >> artifacts-apk/README.txt
-          # 显示打包内容大小
-          echo "📦 打包大小: $(du -sh artifacts-apk/android-hybrid-template.tar.gz | cut -f1)"
-        else
-          echo "❌ 未找到打包文件"
-          # 创建说明文件
-          echo "构建失败，请检查日志" > artifacts-apk/ERROR.txt
-        fi
+        ## 在Android平板上运行
+        
+        ### 使用Termux
+        1. 安装Termux应用
+        2. 在Termux中安装依赖：
+           ```bash
+           pkg update
+           pkg install nodejs
+           ```
+        3. 解压此包并运行：
+           ```bash
+           ./tabby.sh
+           ```
+        
+        ### 使用Linux容器
+        1. 使用UserLAnd或类似应用
+        2. 安装Ubuntu/Debian
+        3. 运行此包
+        
+        ## 功能限制
+        - 需要图形界面支持（VNC或X11）
+        - 某些硬件加速功能可能不可用
+        EOF
+        
+        tar -czf tabby-linux-arm64.tar.gz tabby-linux-arm64/
+        echo "📦 打包大小: $(du -sh tabby-linux-arm64.tar.gz | cut -f1)"
 
-    - name: 上传Android APK
+    - name: 上传Linux ARM64包
       uses: actions/upload-artifact@v4
       with:
-        name: android-apk-arm64
-        path: artifacts-apk/*
+        name: Linux-ARM64-Android
+        path: |
+          dist/*.deb
+          dist/*.AppImage
+          tabby-linux-arm64.tar.gz
       if: always()
 
   # 发布任务
   release:
     name: 创建发布
     runs-on: ubuntu-24.04
-    needs: [build-windows, build-macos, build-android]
+    needs: [build-windows, build-macos, build-linux-arm64]
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
     - name: 检出代码
@@ -330,7 +329,7 @@ jobs:
         echo "📊 文件统计:"
         echo "Windows x64: $(find release -name "*.exe" -o -name "*windows*.zip" | wc -l) 个文件"
         echo "macOS arm64: $(find release -name "*.dmg" -o -name "*macos*.zip" | wc -l) 个文件"
-        echo "Android arm64: $(find release -name "*.apk" -o -name "*android*.txt" | wc -l) 个文件"
+        echo "Linux ARM64: $(find release -name "*.deb" -o -name "*.AppImage" -o -name "*arm64*.tar.gz" | wc -l) 个文件"
 
     - name: 获取发布信息
       id: release_info
@@ -355,12 +354,17 @@ jobs:
         ### macOS 版本  
         - **DMG 安装包**: `*.dmg` - 拖拽到应用程序文件夹安装
         - **ZIP 压缩包**: `*.zip` - 直接解压使用
+        
+        ### Linux ARM64 版本（Android平板）
+        - **DEB 包**: `*.deb` - 适用于Debian/Ubuntu系统
+        - **AppImage**: `*.AppImage` - 通用Linux应用格式
+        - **便携版**: `tabby-linux-arm64.tar.gz` - 适用于Termux等环境
 
         ## 🔧 架构支持
 
         - **Windows x64**: Intel/AMD 64位处理器
         - **macOS arm64**: Apple Silicon (M1/M2/M3/M4) 芯片
-        - **Android arm64**: Android 7.0+ 平板设备
+        - **Linux ARM64**: Android平板、树莓派等ARM64设备
 
         ## ⚙️ 主要功能
 
@@ -412,4 +416,4 @@ jobs:
         echo "📋 发布内容统计:"
         echo "  Windows x64: $(find release -name "*.exe" -o -name "*windows*.zip" | wc -l) 个文件"
         echo "  macOS arm64: $(find release -name "*.dmg" -o -name "*macos*.zip" | wc -l) 个文件"
-        echo "  Android arm64: $(find release -name "*.apk" -o -name "*android*.txt" | wc -l) 个文件"
+        echo "  Linux ARM64: $(find release -name "*.deb" -o -name "*.AppImage" -o -name "*arm64*.tar.gz" | wc -l) 个文件"
