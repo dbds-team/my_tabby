@@ -12,7 +12,19 @@ shelljs.mkdir('-p', androidDir)
 
 // 首先构建Web版本
 console.log('📦 构建Web版本...')
-shelljs.exec('yarn run build')
+const buildResult = shelljs.exec('yarn run build')
+if (buildResult.code !== 0) {
+    console.error('❌ Web构建失败')
+    process.exit(1)
+}
+
+// 检查dist目录是否存在
+if (!fs.existsSync('dist')) {
+    console.error('❌ 构建后未找到dist目录')
+    process.exit(1)
+}
+
+console.log('✅ Web构建成功，dist目录大小:', shelljs.exec('du -sh dist').stdout.trim())
 
 // 创建Capacitor项目
 console.log('⚡ 初始化Capacitor项目...')
@@ -42,11 +54,15 @@ const packageJson = {
 
 fs.writeFileSync(`${androidDir}/package.json`, JSON.stringify(packageJson, null, 2))
 
+// 复制dist目录到android-hybrid
+console.log('📂 复制Web资源到Android项目...')
+shelljs.cp('-r', 'dist', `${androidDir}/www`)
+
 // Capacitor配置
 const capacitorConfig = {
   appId: 'org.tabby.terminal',
   appName: 'Tabby Terminal',
-  webDir: '../dist',
+  webDir: 'www',
   server: {
     androidScheme: 'https',
     cleartext: true

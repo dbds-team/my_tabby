@@ -290,14 +290,10 @@ jobs:
         - 建议先在本地环境测试构建
         EOF
         
-        # 检查并复制Web资源
-        echo "📁 检查dist目录:"
-        if [ -d "../dist" ]; then
-          echo "✅ 找到dist目录，内容大小: $(du -sh ../dist | cut -f1)"
-          ls -la ../dist | head -10
-        else
-          echo "❌ 未找到dist目录"
-        fi
+        # 检查项目内容
+        echo "📁 Android项目内容:"
+        ls -la
+        echo "📦 项目大小: $(du -sh . | cut -f1)"
         
         # 打包Android项目模板
         cd ..
