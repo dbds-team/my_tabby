@@ -18,13 +18,14 @@ if (buildResult.code !== 0) {
     process.exit(1)
 }
 
-// 检查dist目录是否存在
-if (!fs.existsSync('dist')) {
-    console.error('❌ 构建后未找到dist目录')
+// 检查构建输出目录
+const distDir = 'app/dist'
+if (!fs.existsSync(distDir)) {
+    console.error('❌ 构建后未找到输出目录:', distDir)
     process.exit(1)
 }
 
-console.log('✅ Web构建成功，dist目录大小:', shelljs.exec('du -sh dist').stdout.trim())
+console.log('✅ Web构建成功，输出目录大小:', shelljs.exec(`du -sh ${distDir}`).stdout.trim())
 
 // 创建Capacitor项目
 console.log('⚡ 初始化Capacitor项目...')
@@ -54,9 +55,9 @@ const packageJson = {
 
 fs.writeFileSync(`${androidDir}/package.json`, JSON.stringify(packageJson, null, 2))
 
-// 复制dist目录到android-hybrid
+// 复制构建输出到android-hybrid
 console.log('📂 复制Web资源到Android项目...')
-shelljs.cp('-r', 'dist', `${androidDir}/www`)
+shelljs.cp('-r', distDir, `${androidDir}/www`)
 
 // Capacitor配置
 const capacitorConfig = {
