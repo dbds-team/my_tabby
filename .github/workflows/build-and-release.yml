@@ -264,8 +264,7 @@ jobs:
     - name: 准备Android项目
       run: |
         cd android-hybrid
-        # 下载gradle wrapper
-        curl -L https://github.com/gradle/gradle/raw/v8.5.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
+        # 不需要gradle wrapper，Capacitor会自动处理
         # 创建示例构建说明
         cat > BUILD_INSTRUCTIONS.md << 'EOF'
         # Tabby Terminal Android 构建说明
