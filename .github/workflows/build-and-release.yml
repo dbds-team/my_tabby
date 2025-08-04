@@ -297,7 +297,21 @@ jobs:
         
         # 打包Android项目模板
         cd ..
-        tar -czf android-hybrid-template.tar.gz android-hybrid/
+        echo "📦 打包前检查目录大小:"
+        du -sh android-hybrid/
+        echo "📁 检查www目录内容:"
+        if [ -d android-hybrid/www ]; then
+          echo "www目录存在"
+          ls -la android-hybrid/www/ | head -10
+          echo "www目录大小: $(du -sh android-hybrid/www/ | cut -f1)"
+        else
+          echo "❌ www目录不存在"
+        fi
+        # 使用更详细的tar命令
+        tar -czvf android-hybrid-template.tar.gz android-hybrid/ > tar-files.log 2>&1
+        echo "📦 打包后文件大小:"
+        ls -lh android-hybrid-template.tar.gz
+        echo "📋 打包文件数量: $(wc -l < tar-files.log)"
 
     - name: 整理构建产物
       run: |

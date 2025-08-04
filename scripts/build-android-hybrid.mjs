@@ -57,7 +57,11 @@ fs.writeFileSync(`${androidDir}/package.json`, JSON.stringify(packageJson, null,
 
 // 复制构建输出到android-hybrid
 console.log('📂 复制Web资源到Android项目...')
-shelljs.cp('-r', distDir, `${androidDir}/www`)
+// 先创建www目录
+shelljs.mkdir('-p', `${androidDir}/www`)
+// 复制dist目录的内容（不是目录本身）
+shelljs.cp('-r', `${distDir}/*`, `${androidDir}/www/`)
+console.log('📦 复制后www目录大小:', shelljs.exec(`du -sh ${androidDir}/www`).stdout.trim())
 
 // Capacitor配置
 const capacitorConfig = {
