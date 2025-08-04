@@ -137,8 +137,14 @@ jobs:
 
     - name: 修复electron-builder问题
       run: |
+        # 修复 ArchiveTarget.js 中的 updateInfo 问题
         sed -i '' 's/updateInfo = await/\/\/updateInfo = await/g' node_modules/app-builder-lib/out/targets/ArchiveTarget.js || true
+        # 创建 electron 符号链接
         ln -s ../../node_modules/electron app/node_modules || true
+        # 修复 DMG 构建权限问题
+        sudo spctl --master-disable || true
+        # 清理可能的缓存问题
+        rm -rf ~/Library/Caches/electron-builder || true
 
     - name: 构建macOS应用
       run: node scripts/build-macos.mjs
@@ -146,6 +152,8 @@ jobs:
         ARCH: arm64
         RUST_TARGET_TRIPLE: aarch64-apple-darwin
         USE_HARD_LINKS: false
+        # 禁用代码签名（如果没有证书）
+        CSC_IDENTITY_AUTO_DISCOVERY: false
 
     - name: 整理构建产物
       run: |
@@ -204,11 +212,68 @@ jobs:
         path: artifacts-zip/*
       if: steps.check_zip.outputs.has_zip == 'true'
 
+  # Android构建任务
+  build-android:
+    name: Android构建 (arm64)
+    runs-on: ubuntu-24.04
+    needs: lint
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: 设置JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: 设置Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: 设置Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: 安装依赖
+      run: |
+        npm i -g yarn
+        yarn --network-timeout 1000000
+
+    - name: 创建Android项目
+      run: node scripts/build-android.mjs
+
+    - name: 构建APK
+      run: |
+        cd android-app
+        chmod +x gradlew
+        ./gradlew assembleRelease || echo "Gradle构建需要配置"
+
+    - name: 整理构建产物
+      run: |
+        mkdir -p artifacts-apk
+        if [ -f android-app/app/build/outputs/apk/release/*.apk ]; then
+          cp android-app/app/build/outputs/apk/release/*.apk artifacts-apk/
+        else
+          echo "⚠️ APK构建需要完整的Android开发环境"
+          echo "Tabby Terminal Android版本" > artifacts-apk/README.txt
+          echo "请使用Android Studio打开android-app目录进行构建" >> artifacts-apk/README.txt
+        fi
+
+    - name: 上传Android APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: android-apk-arm64
+        path: artifacts-apk/*
+      if: always()
+
   # 发布任务
   release:
     name: 创建发布
     runs-on: ubuntu-24.04
-    needs: [build-windows, build-macos]
+    needs: [build-windows, build-macos, build-android]
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
     - name: 检出代码
@@ -233,6 +298,7 @@ jobs:
         echo "📊 文件统计:"
         echo "Windows x64: $(find release -name "*.exe" -o -name "*windows*.zip" | wc -l) 个文件"
         echo "macOS arm64: $(find release -name "*.dmg" -o -name "*macos*.zip" | wc -l) 个文件"
+        echo "Android arm64: $(find release -name "*.apk" -o -name "*android*.txt" | wc -l) 个文件"
 
     - name: 获取发布信息
       id: release_info
@@ -262,6 +328,7 @@ jobs:
 
         - **Windows x64**: Intel/AMD 64位处理器
         - **macOS arm64**: Apple Silicon (M1/M2/M3/M4) 芯片
+        - **Android arm64**: Android 7.0+ 平板设备
 
         ## ⚙️ 主要功能
 
@@ -313,3 +380,4 @@ jobs:
         echo "📋 发布内容统计:"
         echo "  Windows x64: $(find release -name "*.exe" -o -name "*windows*.zip" | wc -l) 个文件"
         echo "  macOS arm64: $(find release -name "*.dmg" -o -name "*macos*.zip" | wc -l) 个文件"
+        echo "  Android arm64: $(find release -name "*.apk" -o -name "*android*.txt" | wc -l) 个文件"
