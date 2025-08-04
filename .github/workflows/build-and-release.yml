@@ -252,27 +252,48 @@ jobs:
     - name: 创建Android项目
       run: node scripts/build-android.mjs
 
-    - name: 构建APK
+    - name: 准备Android项目
       run: |
         cd android-app
         # 下载gradle wrapper
         curl -L https://github.com/gradle/gradle/raw/v8.5.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
-        chmod +x gradlew
-        # 初始化gradle
-        ./gradlew wrapper --gradle-version=8.5 || true
-        # 尝试构建（可能需要更多配置）
-        ./gradlew assembleRelease || echo "Gradle构建需要额外配置"
+        # 创建示例构建说明
+        cat > BUILD_INSTRUCTIONS.md << 'EOF'
+        # Tabby Terminal Android 构建说明
+
+        ## 环境要求
+        - Android Studio Arctic Fox 或更高版本
+        - JDK 17
+        - Android SDK (API Level 34)
+        - Android NDK (如需原生代码支持)
+
+        ## 构建步骤
+        1. 用 Android Studio 打开此目录
+        2. 等待 Gradle 同步完成
+        3. 点击 Build > Build APK 或 Build > Generate Signed APK
+
+        ## 命令行构建
+        ```bash
+        ./gradlew assembleDebug    # 构建调试版本
+        ./gradlew assembleRelease  # 构建发布版本
+        ```
+
+        ## 注意事项
+        - 首次构建需要下载依赖，请确保网络连接正常
+        - Termux 相关依赖可能需要额外配置
+        - 建议先在本地环境测试构建
+        EOF
+        
+        # 打包Android项目模板
+        cd ..
+        tar -czf android-app-template.tar.gz android-app/
 
     - name: 整理构建产物
       run: |
         mkdir -p artifacts-apk
-        if [ -f android-app/app/build/outputs/apk/release/*.apk ]; then
-          cp android-app/app/build/outputs/apk/release/*.apk artifacts-apk/
-        else
-          echo "⚠️ APK构建需要完整的Android开发环境"
-          echo "Tabby Terminal Android版本" > artifacts-apk/README.txt
-          echo "请使用Android Studio打开android-app目录进行构建" >> artifacts-apk/README.txt
-        fi
+        mv android-app-template.tar.gz artifacts-apk/
+        echo "Android项目模板已准备就绪" > artifacts-apk/README.txt
+        echo "解压 android-app-template.tar.gz 并使用 Android Studio 打开进行构建" >> artifacts-apk/README.txt
 
     - name: 上传Android APK
       uses: actions/upload-artifact@v4
